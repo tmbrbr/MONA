@@ -23,18 +23,14 @@
 #include "../BDD/hash.h"
 #include "../Mem/mem.h"
 
-/* used by minimization_term_fn */
-static int *final;
-static unsigned *discrs;
-static unsigned length;
-
-static bdd_ptr minimization_term_fn(bdd_ptr p)
+static bdd_ptr minimization_term_fn(bdd_ptr p, void *context)
 {
+  unsigned *discrs = (unsigned *)(context);
   return (discrs[p]);
 }
 
  
-static unsigned rename_partition(unsigned *roots)
+static unsigned rename_partition(unsigned *roots, int *final, unsigned *discrs, unsigned length)
 /* calculate equivalence classes as given by the conjunction of bdd_roots 
 and final; put the result in discrs and return the number of classes*/
 {  
@@ -62,6 +58,9 @@ and final; put the result in discrs and return the number of classes*/
 
 DFA *dfaMinimize(DFA *a) 
 {
+  if (!a) {
+    return NULL;
+  }
   unsigned num_old_blocs;
   unsigned num_new_blocs = 2;
   unsigned i;
@@ -69,6 +68,10 @@ DFA *dfaMinimize(DFA *a)
   bdd_manager *new_bddm = 0;
   unsigned not_first = 0;
 
+  int *final;
+  unsigned *discrs;
+  unsigned length;
+  
   length = a->ns;
   final = a->f;
   
@@ -77,7 +80,7 @@ DFA *dfaMinimize(DFA *a)
   {
     unsigned *roots =  mem_alloc((size_t)(sizeof *roots) * length);
     mem_zero(roots,(size_t)(sizeof *roots) * length);
-    rename_partition(roots);
+    rename_partition(roots, final, discrs, length);
     mem_free(roots);
   }
   
@@ -92,13 +95,17 @@ DFA *dfaMinimize(DFA *a)
     
     new_bddm = bdd_new_manager(bddm->table_elements, 
 			       bddm->table_elements/8 + 4);
+    // Check for null
+    if (new_bddm == NULL) {
+        return NULL;
+    }
     bdd_prepare_apply1(bddm);
     
     for (i = 0; i < length; i++)
-	(void) bdd_apply1(bddm, a->q[i], new_bddm, &minimization_term_fn);
+	(void) bdd_apply1(bddm, a->q[i], new_bddm, (void *)discrs, &minimization_term_fn);
     
     num_old_blocs = num_new_blocs;
-    num_new_blocs = rename_partition(bdd_roots(new_bddm));
+    num_new_blocs = rename_partition(bdd_roots(new_bddm), final, discrs, length);
 
   } while (num_new_blocs > num_old_blocs);
   

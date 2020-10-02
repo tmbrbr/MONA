@@ -32,7 +32,8 @@ Guide guide;
 char *my_global_variable;
 bdd_manager *global_bddm;
 
-void check_off_index(bdd_record *node_pointer)
+void check_off_index(bdd_record *node_pointer, void *context,
+                     void (*leaf_function)(unsigned value, void *context))
      /*this function is written using primitives at a lower level
        than using the bdd_then and bdd_else; the reason is that 
        bdd_operate_on_nodes requires a C pointer a BDD node, not
@@ -132,7 +133,7 @@ int main () {
     bdd_prepare_apply1(G->ss[1].bddm);
     my_global_variable = var_is_used;
     global_bddm = (G->ss[1].bddm);
-    bdd_operate_on_nodes(G->ss[1].bddm, my_bdd_ptr, &check_off_index);
+    bdd_operate_on_nodes(G->ss[1].bddm, my_bdd_ptr, NULL, NULL, &check_off_index);
     
     for (i = 0; i < numvars; i++)
       if (var_is_used[i])

@@ -1,3 +1,4 @@
+/* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /*
  * MONA
  * Copyright (C) 1997-2013 Aarhus University.
@@ -23,48 +24,42 @@
 #include <stdlib.h>
 #include "dfa.h"
 #include "../BDD/bdd_internal.h"
+#include "../Mem/mem.h"
 
-#define MAX_EXCEPTION 50
-#define MAX_VARIABLES 10
-/* #warning INTERNAL LIMITS */
-
-struct path_descr {
-  int value;
-  char path[MAX_VARIABLES+1];
-};
-
-int exception_index, no_exceptions;
-struct path_descr exceptions[MAX_EXCEPTION];
-
-void dfaAllocExceptions(int n)
+void dfaAllocExceptions(DFABuilder* b, int n)
 {
-  invariant(n<=MAX_EXCEPTION);
+  int i;
 
-  no_exceptions = n;
-  exception_index = 0;
+  b->exceptions = mem_alloc(sizeof(struct path_descr) * n);
+  b->no_exceptions = n;
+  b->exception_index = 0;
+  // Allocate the path field of each exception
+  for (i = 0; i < b->no_exceptions; i++) {
+    b->exceptions[i].path = mem_alloc(sizeof(char) * (b->offsets_size + 1));
+  }
+  b->bddpaths = mem_alloc(sizeof(bdd_ptr) * n);
 }
 
-void dfaStoreException(int value, char *path)
+void dfaStoreException(DFABuilder* b, int value, char *path)
 {
-  invariant(exception_index<no_exceptions);
+  invariant(b->exception_index<b->no_exceptions);
 
-  exceptions[exception_index].value = value;
-  strcpy(exceptions[exception_index].path, path);
+  b->exceptions[b->exception_index].value = value;
+  strcpy(b->exceptions[b->exception_index].path, path);
   
-  exception_index++;
+  b->exception_index++;
 }
 
-int no_states;
-unsigned default_state;
-
-unsigned unite_leaf_fn(unsigned p_value, unsigned q_value)
+unsigned unite_leaf_fn(unsigned p_value, unsigned q_value, void *context)
 {
-  if ((p_value == q_value) || (q_value == default_state))
+  DFABuilder *b = (DFABuilder *)(context);
+  if ((p_value == q_value) || (q_value == b->default_state))
     return p_value;
-  else if (p_value == default_state)
+  else if (p_value == b->default_state)
     return q_value;
   else {
-    printf("Error in unite\n");
+    printf("Error in unite (p_value: %d q_value: %d default: %d)\n",
+           p_value, q_value, b->default_state);
     exit(-1);
   }
   return 0; /* avoid compiler warning */
@@ -72,7 +67,7 @@ unsigned unite_leaf_fn(unsigned p_value, unsigned q_value)
 
 
 /* Prerequisite: bddm->roots_array is non empty */
-bdd_ptr unite_roots(bdd_manager *bddm)
+bdd_ptr unite_roots(DFABuilder *b, bdd_manager *bddm)
 {
   int no_roots = bddm->roots_index;
   int i;
@@ -90,58 +85,51 @@ bdd_ptr unite_roots(bdd_manager *bddm)
   for (i = 1; i < no_roots; i++)
     result = bdd_apply2_hashed(bddm, result, 
 			       bddm, bddm->roots_array[i],
-			       bddm, &unite_leaf_fn);
+			       bddm, (void *)b, &unite_leaf_fn);
   
   return result;
 }
 
-int sorted_indices[MAX_VARIABLES];  /* holds indices, which order the offsets argument to dfaBuild */
-int global_offsets[MAX_VARIABLES];  /* holds the offsets argument to dfaBuild */
-int offsets_size;                   /* holds the offsets_size argument to dfaBuild */
-char sorted_path[MAX_VARIABLES];    /* holds the current exception path, sorted according to the offsets */
-
-DECLARE_SEQUENTIAL_LIST(sub_results, unsigned)
-
-bdd_ptr makepath(bdd_manager *bddm, int n, unsigned leaf_value, 
-		 void (*update_bddpaths) (unsigned (*new_place) (unsigned node)))
+bdd_ptr makepath(DFABuilder *b, bdd_manager *bddm, int n, unsigned leaf_value,
+		 void (*update_bddpaths) (unsigned (*new_place) (unsigned node, bdd_manager *bddm_context),
+                                          bdd_manager *bddm_context, void *context))
 {
   bdd_ptr res, sub_res, default_state_ptr;
   unsigned index;
 
-  while ((n < offsets_size) && (sorted_path[n] == 'X'))
+  while ((n < b->offsets_size) && (b->sorted_path[n] == 'X'))
     n++;
 
-  if (n >= offsets_size)
-    return (bdd_find_leaf_hashed(bddm, leaf_value, SEQUENTIAL_LIST(sub_results), update_bddpaths));
+  if (n >= b->offsets_size)
+    return (bdd_find_leaf_hashed(bddm, leaf_value, SEQUENTIAL_LIST(b->sub_results), (void *)b, update_bddpaths));
 
-  sub_res = makepath(bddm, n+1, leaf_value, update_bddpaths);
-  PUSH_SEQUENTIAL_LIST(sub_results, unsigned, sub_res);
-  default_state_ptr = bdd_find_leaf_hashed(bddm, default_state, SEQUENTIAL_LIST(sub_results), update_bddpaths);
-  POP_SEQUENTIAL_LIST(sub_results, unsigned, sub_res);
+  sub_res = makepath(b, bddm, n+1, leaf_value, update_bddpaths);
+  PUSH_SEQUENTIAL_LIST(b->sub_results, unsigned, sub_res);
+  default_state_ptr = bdd_find_leaf_hashed(bddm, b->default_state, SEQUENTIAL_LIST(b->sub_results), (void *)b, update_bddpaths);
+  POP_SEQUENTIAL_LIST(b->sub_results, unsigned, sub_res);
 
-  index = global_offsets[sorted_indices[n]];
+  index = b->global_offsets[b->sorted_indices[n]];
   
-  if (sorted_path[n] == '0')
-    res = bdd_find_node_hashed(bddm, sub_res, default_state_ptr, index, SEQUENTIAL_LIST(sub_results), update_bddpaths);
+  if (b->sorted_path[n] == '0')
+    res = bdd_find_node_hashed(bddm, sub_res, default_state_ptr, index, SEQUENTIAL_LIST(b->sub_results), (void *)b, update_bddpaths);
   else
-    res = bdd_find_node_hashed(bddm, default_state_ptr, sub_res, index, SEQUENTIAL_LIST(sub_results), update_bddpaths);
+    res = bdd_find_node_hashed(bddm, default_state_ptr, sub_res, index, SEQUENTIAL_LIST(b->sub_results), (void *)b, update_bddpaths);
 
   return res;
 }
 
-int exp_count;
-bdd_ptr bddpaths[MAX_EXCEPTION];
-
-void update_bddpaths(unsigned (*new_place) (unsigned node)) 
+void update_bddpaths(unsigned (*new_place) (unsigned node, bdd_manager *bddm_context), bdd_manager *bddm_context, void *context) 
 {
+  DFABuilder *b = (DFABuilder *)(context); 
   int j;
   
-  for (j = 0; j < exp_count; j++) 
-    bddpaths[j] = new_place(bddpaths[j]);
+  for (j = 0; j < b->exp_count; j++) 
+    b->bddpaths[j] = new_place(b->bddpaths[j], bddm_context);
 }
 
-void makebdd(bdd_manager *bddm)
+void makebdd(DFABuilder *b)
 {
+  bdd_manager *bddm = b->aut->bddm;
   bdd_manager *tmp_bddm;
   bdd_ptr united_bdds, default_ptr;
   int i;
@@ -152,93 +140,133 @@ void makebdd(bdd_manager *bddm)
   ** insert a leaf with value 'default_state' in tmp_bddm,
   ** if not already present
   */
-  default_ptr = bdd_find_leaf_hashed(tmp_bddm, default_state, SEQUENTIAL_LIST(sub_results), &update_bddpaths); 
+  default_ptr = bdd_find_leaf_hashed(tmp_bddm,
+                                     b->default_state,
+                                     SEQUENTIAL_LIST(b->sub_results),
+                                     (void *)b,
+                                     &update_bddpaths); 
 
-  for (exp_count = 0; exp_count < no_exceptions; exp_count++) {
-    for (i = 0; i < offsets_size; i++)
-      sorted_path[i] = exceptions[exp_count].path[sorted_indices[i]];
+  for (b->exp_count = 0; b->exp_count < b->no_exceptions; b->exp_count++) {
+    for (i = 0; i < b->offsets_size; i++)
+      b->sorted_path[i] = b->exceptions[b->exp_count].path[b->sorted_indices[i]];
 
     /* clear the cache */
     bdd_kill_cache(tmp_bddm);
     bdd_make_cache(tmp_bddm, 8, 4);
     tmp_bddm->cache_erase_on_doubling = TRUE;
 
-    bddpaths[exp_count] = makepath(tmp_bddm, 0, exceptions[exp_count].value, &update_bddpaths);
-    PUSH_SEQUENTIAL_LIST(tmp_bddm->roots, unsigned, bddpaths[exp_count]);
+    b->bddpaths[b->exp_count] = makepath(b, tmp_bddm, 0, b->exceptions[b->exp_count].value, &update_bddpaths);
+    PUSH_SEQUENTIAL_LIST(tmp_bddm->roots, unsigned, b->bddpaths[b->exp_count]);
   }    
 
-  if (no_exceptions == 0)
+  if (b->no_exceptions == 0)
     united_bdds = default_ptr;
-  else if (no_exceptions == 1) 
+  else if (b->no_exceptions == 1) 
     united_bdds = TOP_SEQUENTIAL_LIST(tmp_bddm->roots);
   else
-    united_bdds = unite_roots(tmp_bddm);
+    united_bdds = unite_roots(b, tmp_bddm);
 
   bdd_prepare_apply1(tmp_bddm);
-  bdd_apply1(tmp_bddm, united_bdds, bddm, &fn_identity);       /* store the result in bddm->roots */
+  bdd_apply1(tmp_bddm, united_bdds, bddm, (void *)b, &fn_identity);       /* store the result in bddm->roots */
 
   bdd_kill_manager(tmp_bddm);
 }
 
-int offsets_cmp(const void *index1, const void *index2) 
+int offsets_cmp(const void *index1, const void *index2, void* context) 
 {
+  DFABuilder *b = (DFABuilder*)context;
   int o1, o2;
   
-  o1 = global_offsets[*((int *)index1)];
-  o2 = global_offsets[*((int *)index2)];
+  o1 = b->global_offsets[*((int *)index1)];
+  o2 = b->global_offsets[*((int *)index2)];
   
   if (o1 < o2) return -1;
   else if (o1 == o2) return 0;
   else return 1;
 }
 
-DFA *aut;
+DFABuilder* dfaSetup(int ns, int os, unsigned int *offsets)
+{
+  int i;
+  DFABuilder *b;
 
-void dfaSetup(int ns, int os, int *offsets)
+  b = mem_alloc(sizeof *b);
+ 
+  MAKE_SEQUENTIAL_LIST(b->sub_results, unsigned, 64);
+  
+  b->no_states = ns;
+
+  b->offsets_size = os;
+
+  b->sorted_indices = mem_alloc(sizeof(unsigned int) * b->offsets_size);
+  b->global_offsets = mem_alloc(sizeof(unsigned int) * b->offsets_size);
+  b->sorted_path = mem_alloc(sizeof(char) * b->offsets_size);
+  
+  for (i = 0; i < b->offsets_size; i++) {
+    b->sorted_indices[i] = i;
+    b->global_offsets[i] = offsets[i];
+  }
+
+  qsort_r(b->sorted_indices, b->offsets_size, sizeof(int), offsets_cmp, (void*)b);
+
+  // This can return null if table size is too large
+  b->aut = dfaMake(b->no_states);
+
+  if (b->aut != NULL) {
+    b->aut->ns = b->no_states;
+    b->aut->s = 0;
+  }
+
+  return b;
+}
+
+void dfaStoreState(DFABuilder *b, int ds)
 {
   int i;
 
-  invariant(os<=MAX_VARIABLES);
-
-  MAKE_SEQUENTIAL_LIST(sub_results, unsigned, 64);
-  
-  no_states = ns;
-
-  offsets_size = os;
-  for (i = 0; i < offsets_size; i++) {
-    sorted_indices[i] = i;
-    global_offsets[i] = offsets[i];
+  if ((ds < 0) || (ds >= b->no_states)) {
+    printf("Error dfaStoreState: default state larger than number of states! (ds: %d ns: %d)\n",
+           ds, b->no_states);
+    exit(-1);
   }
 
-  qsort(sorted_indices, offsets_size, sizeof(int), &offsets_cmp);
+  b->default_state = ds;
 
-  aut = dfaMake(no_states);
+  if (b->aut != NULL) {
+    bdd_kill_cache(b->aut->bddm);
+    bdd_make_cache(b->aut->bddm, 8, 4);
+    makebdd(b);
+  }
 
-  aut->ns = no_states;
-  aut->s = 0;
+  // Free the allocated exceptions
+  for (i = 0; i < b->no_exceptions; i++) {
+    mem_free(b->exceptions[i].path);
+  }
+  mem_free(b->exceptions);
+  mem_free(b->bddpaths);
 }
 
-void dfaStoreState(int ds)
-{
-  default_state = ds;
-
-  bdd_kill_cache(aut->bddm);
-  bdd_make_cache(aut->bddm, 8, 4);
-
-  makebdd(aut->bddm);
-}
-
-DFA *dfaBuild(char *finals)
+DFA *dfaBuild(DFABuilder *b, char *finals)
 {
   int        i;
   unsigned  *root_ptr;
 
-  for (i=0, root_ptr = bdd_roots(aut->bddm); i < no_states; root_ptr++, i++) {
-    aut->q[i] = *root_ptr;
-    aut->f[i] = (finals[i] == '-') ? -1 : (finals[i] == '+' ? 1 : 0);
+  DFA* aut = b->aut;
+
+  if (aut != NULL) {
+    for (i=0, root_ptr = bdd_roots(aut->bddm); i < b->no_states; root_ptr++, i++) {
+      aut->q[i] = *root_ptr;
+      aut->f[i] = (finals[i] == '-') ? -1 : (finals[i] == '+' ? 1 : 0);
+    }
   }
 
-  FREE_SEQUENTIAL_LIST(sub_results);
-
+  // Free all components of DFABuilder
+  FREE_SEQUENTIAL_LIST(b->sub_results);
+  mem_free(b->sorted_indices);
+  mem_free(b->global_offsets);
+  mem_free(b->sorted_path);
+  // Do *not* free the aut field as we are returning that
+  mem_free(b);
+  
   return aut;
 }

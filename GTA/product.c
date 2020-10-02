@@ -33,7 +33,7 @@ static PairHashTable *inverse; /* inverses for 'pairs' */
 static GTA *aa1, *aa2, *res; /* automata */
 static SsId s, lSs, rSs; /* current, left and right state spaces */
 
-static unsigned fn_pair(unsigned p, unsigned q)
+static unsigned fn_pair(unsigned p, unsigned q, void *context)
 {
   unsigned n;
 
@@ -64,7 +64,7 @@ void makeProductBehaviour(State i, State j)
      aa2->ss[s].bddm, 
      BDD_ROOT(aa2->ss[s].bddm,
 	      BEH(aa2->ss[s], paRight(pairs[lSs], i), paRight(pairs[rSs], j))), 
-     res->ss[s].bddm, 
+     res->ss[s].bddm, NULL,
      fn_pair); 
 
   BM(b[s], i, j) = BDD_LAST_HANDLE(res->ss[s].bddm); 

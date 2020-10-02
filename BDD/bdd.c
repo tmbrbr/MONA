@@ -1,3 +1,4 @@
+/* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /*
  * MONA
  * Copyright (C) 1997-2013 Aarhus University.
@@ -27,9 +28,6 @@
 extern int memlimit;
 
 struct stat_record_ stat_record[BDD_STAT_INDEX_SIZE];
-
-boolean table_has_been_doubled;
-
 
 /* if something is cached for (p, q), then return it; otherwise, return
    0.  In any case, set *h to the hash value calculated) */
@@ -116,7 +114,7 @@ unsigned bdd_leaf_value(bdd_manager *bddm, unsigned p) {
 }
 
 
-unsigned same_r(unsigned r) {
+unsigned same_r(unsigned r, bdd_manager *bddm_context) {
   return (r);
 }
 
@@ -128,7 +126,7 @@ GNUC_INLINE bdd_ptr bdd_get_free_node_sequential(bdd_manager *bddm) {
   else {
     double_table_sequential(bddm);
     if (bddm->cache) {
-      double_cache(bddm, &same_r);    
+      double_cache(bddm, NULL, &same_r);    
     }
     return (bddm->table_next++);
   }
@@ -152,15 +150,15 @@ GNUC_INLINE unsigned bdd_find_leaf_sequential(bdd_manager *bddm, unsigned val) {
 GNUC_INLINE unsigned bdd_find_node_hashed(bdd_manager *bddm,
 					  unsigned l, unsigned r, unsigned indx,
 					  unsigned *some_roots,
-					  void (*update_fn)(unsigned 
-							    (*new_place)(unsigned node))) {
+                                          void *context,
+					  void (*update_fn)(
+                                            unsigned (*new_place)(unsigned node, bdd_manager *bddm_context),
+                                            bdd_manager *bddm_context, void *context)) {
   unsigned h;
   bdd_record *ptr;
   unsigned i0, i1;
   unsigned i;
   unsigned temp;
-
-  table_has_been_doubled = FALSE;
 
 start: 
  
@@ -220,11 +218,10 @@ insert_in_new_bucket:
   if (bddm->table_elements > bddm->table_double_trigger) {
 /*    printf("double_table_and_cache_hashed called:\n"); */
     /*only change  l and r if node is not a leaf*/
-    double_table_and_cache_hashed(bddm, some_roots, update_fn,
-				  &l, &r, (indx != BDD_LEAF_INDEX));
+    double_table_and_cache_hashed(bddm, some_roots, context, update_fn,
+                                  &l, &r, (indx != BDD_LEAF_INDEX));
     /*now nodes l and r are possibly to be found in new places, and we
       should use quite a different primary bucket, so...*/
-    table_has_been_doubled = TRUE;
     goto start;
   }
  
@@ -267,7 +264,7 @@ GNUC_INLINE bdd_ptr bdd_find_node_hashed_add_root(bdd_manager *bddm,
 						  bdd_ptr l, bdd_ptr r, unsigned indx) {
   bdd_ptr p;
   invariant(indx <= BDD_MAX_INDEX);
-  p = bdd_find_node_hashed(bddm, l, r, indx, BDD_ROOTS(bddm), NULL);
+  p = bdd_find_node_hashed(bddm, l, r, indx, BDD_ROOTS(bddm), NULL, NULL);
   BDD_ADD_ROOT(bddm, p);
   return (p);
 }
@@ -276,7 +273,7 @@ GNUC_INLINE bdd_handle bdd_handle_find_node_hashed_add_root(bdd_manager *bddm,
 							    bdd_ptr l, bdd_ptr r, unsigned indx) {
   bdd_ptr p;
   invariant(indx <= BDD_MAX_INDEX);
-  p = bdd_find_node_hashed(bddm, l, r, indx, BDD_ROOTS(bddm), NULL);
+  p = bdd_find_node_hashed(bddm, l, r, indx, BDD_ROOTS(bddm), NULL, NULL);
   BDD_ADD_ROOT(bddm, p);
   return (BDD_LAST_HANDLE(bddm));
 }
@@ -284,20 +281,22 @@ GNUC_INLINE bdd_handle bdd_handle_find_node_hashed_add_root(bdd_manager *bddm,
 
 GNUC_INLINE unsigned bdd_find_leaf_hashed(bdd_manager *bddm, unsigned val,
 					  void *some_roots,
-					  void (*update_fn)(unsigned (*new_place)(unsigned node))) {
- return (bdd_find_node_hashed(bddm, val, BDD_USED, BDD_LEAF_INDEX, some_roots, update_fn));
+                                          void *context,
+					  void (*update_fn)(unsigned (*new_place)(unsigned node, bdd_manager *bddm_context),
+                                                            bdd_manager *bddm_context,  void *context)) {
+  return (bdd_find_node_hashed(bddm, val, BDD_USED, BDD_LEAF_INDEX, some_roots, context, update_fn));
 }
 
 GNUC_INLINE bdd_ptr bdd_find_leaf_hashed_add_root(bdd_manager *bddm,
 						  unsigned val) {
-  bdd_ptr p = bdd_find_leaf_hashed(bddm, val, BDD_ROOTS(bddm), NULL);
+  bdd_ptr p = bdd_find_leaf_hashed(bddm, val, BDD_ROOTS(bddm), NULL, NULL);
   BDD_ADD_ROOT(bddm, p);
   return (p);
 }
 
 GNUC_INLINE bdd_handle bdd_handle_find_leaf_hashed_add_root(bdd_manager *bddm,
 							    unsigned val) {
-  bdd_ptr p = bdd_find_leaf_hashed(bddm, val, BDD_ROOTS(bddm), NULL);
+  bdd_ptr p = bdd_find_leaf_hashed(bddm, val, BDD_ROOTS(bddm), NULL, NULL);
   BDD_ADD_ROOT(bddm, p);
   return (BDD_LAST_HANDLE(bddm));
 }
@@ -310,9 +309,7 @@ struct local_##record {\
   record *a;\
   record *a_last;\
   bdd_manager *bddm_p, *bddm_q, *bddm_r;\
-}; \
-unsigned local_##record##_in_use = 0; \
-struct local_##record *local_##record##_primary = NULL
+};
 
 #define DECLARE_POINTER_TO_LOCAL(record, pointer) \
 struct local_##record *pointer
@@ -321,60 +318,50 @@ struct local_##record *pointer
 local_##record##_primary; usually, we can just use that one without
 wasting time getting memory */
 
-#define NEW_LOCAL(record, local, bddm_p, bddm_q, bddm_r) \
-record *a; \
-if (local_##record##_primary && (local_##record##_in_use == 0)) \
-   local = local_##record##_primary; /* use the current one */ \
-else { \
-  local = (struct local_##record *) \
-     mem_alloc((size_t)(sizeof (struct local_##record))); \
-  local->a_size = 1024; \
-  local->act_stack = (record*) \
-      mem_alloc((size_t)(sizeof (record)) * local->a_size); \
-  local->a_last = &(local->act_stack[local->a_size - 1]); \
-  if (!local_##record##_primary) \
-    local_##record##_primary = local; \
-}; \
-local->a = local->act_stack; \
-a = local->a; \
-local->bddm_p = bddm_p; \
-local->bddm_q = bddm_q; \
-local->bddm_r = bddm_r; \
-local_##record##_in_use++
+#define NEW_LOCAL(record, local, bddm_p, bddm_q, bddm_r)        \
+  record *a;                                                    \
+  local = (struct local_##record *)                             \
+    mem_alloc((size_t)(sizeof (struct local_##record)));        \
+  local->a_size = BDD_INITIAL_SIZE;                                   \
+  local->act_stack = (record*)                                  \
+    mem_alloc((size_t)(sizeof (record)) * local->a_size);       \
+  local->a_last = &(local->act_stack[local->a_size - 1]);       \
+  local->a = local->act_stack;                                  \
+  a = local->a;                                                 \
+  local->bddm_p = bddm_p;                                       \
+  local->bddm_q = bddm_q;                                       \
+  local->bddm_r = bddm_r;
 
-#define INCREMENT_LOCAL(local) \
-if (local->a == local->a_last) { \
-    unsigned size = ((local->a_last - local->act_stack) + 1) * 2; \
-    unsigned i = local->a_last - local->act_stack; \
-    local->act_stack = mem_resize(local->act_stack,  \
-				 (size_t)(sizeof *(local->act_stack))  \
-				  * size); \
-    local->a_last =  &(local->act_stack)[size - 1];  \
-    local->a = &(local->act_stack)[i + 1]; \
-  } else \
-      local->a++; \
-a = local->a 
+#define INCREMENT_LOCAL(local)                                         \
+  if (local->a == local->a_last) {                                     \
+    unsigned size = ((local->a_last - local->act_stack) + 1) * 2;      \
+    unsigned i = local->a_last - local->act_stack;                     \
+    local->act_stack = mem_resize(local->act_stack,                    \
+                                  (size_t)(sizeof *(local->act_stack)) \
+				  * size);                             \
+    local->a_last =  &(local->act_stack)[size - 1];                    \
+    local->a = &(local->act_stack)[i + 1];                             \
+    local->a_size = size;                                              \
+  } else                                                               \
+    local->a++;                                                        \
+  a = local->a 
 
 #define DECREMENT_LOCAL(local) \
-local->a--; \
-a = local->a 
+  local->a--;                  \
+  a = local->a 
 
-#define BOTTOM_LOCAL(local) \
-local->a == local->act_stack \
+#define BOTTOM_LOCAL(local)                     \
+  local->a == local->act_stack                  \
 
 #define BEGINNING_LOCAL(local) \
-local->act_stack \
+  local->act_stack             \
 
 #define FREE_LOCAL(record,local) \
-if (local_##record##_in_use > 1) { \
-  mem_free(local->act_stack); \
-  mem_free(local); }; \
-local_##record##_in_use--
-
-
+  mem_free(local->act_stack);    \
+  mem_free(local);               \
 
 #define DECLARE_A(record) \
-  unsigned a_size = 1024; \
+  unsigned a_size = BDD_INITIAL_SIZE; \
   record *act_stack = (record*) \
       mem_alloc((size_t)(sizeof (record)) * a_size); \
    record *a  = act_stack; \
@@ -389,6 +376,7 @@ local_##record##_in_use--
 				  * size); \
     a_last =  &(act_stack)[size - 1];  \
     a = &(act_stack)[i + 1]; \
+    a_size = size; \
   } else \
       a++; \
 
@@ -427,21 +415,17 @@ typedef struct {
 /* declare the type of activation frames for apply1 */
 DECLARE_LOCAL(activation_record_apply1);
 
-/* apply1_ptr points to the current activation frame for
-   an apply1 operation */
-DECLARE_POINTER_TO_LOCAL(activation_record_apply1, apply1_ptr);
-
-
-void update_activation_stack(unsigned (*new_place)(unsigned node)) {
+void update_activation_stack(unsigned (*new_place)(unsigned node, bdd_manager *bddm_context), bdd_manager *bddm_context, void *context) {
+  DECLARE_POINTER_TO_LOCAL(activation_record_apply1, apply1_ptr);
+  apply1_ptr = (struct local_activation_record_apply1 *)(context);
   activation_record_apply1 *a_;
   if (apply1_ptr->bddm_p == apply1_ptr->bddm_r) {
     for (a_ = apply1_ptr->act_stack; a_ <= apply1_ptr->a ; a_++) {   
-      a_->p = new_place(a_->p);
+      a_->p = new_place(a_->p, bddm_context);
       /* a corresponds to a leaf, and a_->second is only well_defined 
-
        * for internal nodes */
       if (apply1_ptr->a != a_) 
-	a_->second = new_place(a_->second);
+	a_->second = new_place(a_->second, bddm_context);
     }	    
   }
   /* all mark fields are invalid at this point */
@@ -449,10 +433,11 @@ void update_activation_stack(unsigned (*new_place)(unsigned node)) {
 }
 
 
-unsigned bdd_apply1_internal(bdd_manager *bddm_p, unsigned p, 
-		    bdd_manager *bddm_r,
-		    unsigned (*apply1_leaf_function)(unsigned value),
-		    boolean add_roots) {
+unsigned bdd_apply1_internal(bdd_manager *bddm_p, unsigned p,
+                             bdd_manager *bddm_r,
+                             void *context,
+                             unsigned (*apply1_leaf_function)(unsigned value, void *context),
+                             boolean add_roots) {
   
   unsigned res;
   bdd_record *node_ptr;
@@ -474,9 +459,9 @@ unsigned bdd_apply1_internal(bdd_manager *bddm_p, unsigned p,
     return res; 
   }
   else {
-  
+    DECLARE_POINTER_TO_LOCAL(activation_record_apply1, apply1_ptr);
     DECLARE_POINTER_TO_LOCAL(activation_record_apply1, local);
-    DECLARE_POINTER_TO_LOCAL(activation_record_apply1, old_apply1_ptr);
+
     /* bdd_apply1 restores the local data; this is necessary,
        for example when the table is doubled during an bdd_apply1
        (which entails a call of bdd_apply1 to copy the table into
@@ -487,9 +472,8 @@ unsigned bdd_apply1_internal(bdd_manager *bddm_p, unsigned p,
     NEW_LOCAL(activation_record_apply1, local,
 	      bddm_p, bddm_p, bddm_r); /* second last argument is dummy */
 
-    MAKE_SEQUENTIAL_LIST(intermediate, unsigned, 1024);
+    MAKE_SEQUENTIAL_LIST(intermediate, unsigned, BDD_INITIAL_SIZE);
 
-    old_apply1_ptr = apply1_ptr;
     apply1_ptr = local;
 
   start:
@@ -500,6 +484,13 @@ unsigned bdd_apply1_internal(bdd_manager *bddm_p, unsigned p,
 #endif
 
     PUSH_SEQUENTIAL_LIST(intermediate, unsigned, going_left);
+    /* Check size of list in case it is exploding. */
+    if (intermediate_length > SEQUENTIAL_LIST_LIMIT) {
+      printf("%s: Sequential list exceeded limit! index: 0x%08x length 0x%08x SEQUENTIAL_LIST_LIMIT: 0x%08x\n",
+             __func__, intermediate_index, intermediate_length, SEQUENTIAL_LIST_LIMIT);
+      FREE_SEQUENTIAL_LIST(intermediate);
+      return 0;
+    }
     
     if ((res = node_ptr->mark) != 0) 
       goto finish;
@@ -509,9 +500,9 @@ unsigned bdd_apply1_internal(bdd_manager *bddm_p, unsigned p,
       if (a->index == BDD_LEAF_INDEX) {
 	/*we are at leaf*/
 	LOAD_lr(node_ptr, tmpp, tmp1);
-	res = bdd_find_leaf_hashed(bddm_r, apply1_leaf_function(tmpp),
+	res = bdd_find_leaf_hashed(bddm_r, apply1_leaf_function(tmpp, context),
 				   SEQUENTIAL_LIST(intermediate),
-				   /*  (void*)0); */
+				   (void *)(apply1_ptr),
 				   &update_activation_stack); 
         p_table = bddm_p->node_table; 
 	node_ptr = &p_table[p];
@@ -542,7 +533,8 @@ unsigned bdd_apply1_internal(bdd_manager *bddm_p, unsigned p,
       } else {
 	res = bdd_find_node_hashed(bddm_r, TOP_SEQUENTIAL_LIST(intermediate), 
 				   res, a->index, 
-				   SEQUENTIAL_LIST(intermediate), 
+				   SEQUENTIAL_LIST(intermediate),
+                                   (void *)(apply1_ptr),
 				   &update_activation_stack);       
        
       }
@@ -556,7 +548,6 @@ unsigned bdd_apply1_internal(bdd_manager *bddm_p, unsigned p,
 	if (add_roots) {
 	  PUSH_SEQUENTIAL_LIST(bddm_r->roots, unsigned, res);
 	}
-	apply1_ptr = old_apply1_ptr;
 	return (res);
       }
       else {
@@ -573,14 +564,16 @@ unsigned bdd_apply1_internal(bdd_manager *bddm_p, unsigned p,
 
 unsigned bdd_apply1(bdd_manager *bddm_p, unsigned p, 
 		    bdd_manager *bddm_r,
-		    unsigned (*apply1_leaf_function)(unsigned value)) {
-   return (bdd_apply1_internal(bddm_p, p, bddm_r,apply1_leaf_function, TRUE));
+                    void *context,
+		    unsigned (*apply1_leaf_function)(unsigned value, void *context)) {
+  return (bdd_apply1_internal(bddm_p, p, bddm_r, context, apply1_leaf_function, TRUE));
 }
   
 unsigned bdd_apply1_dont_add_roots(bdd_manager *bddm_p, unsigned p, 
-		    bdd_manager *bddm_r,
-		    unsigned (*apply1_leaf_function)(unsigned value)) {
-  return (bdd_apply1_internal(bddm_p, p, bddm_r,apply1_leaf_function, FALSE));
+                                   bdd_manager *bddm_r,
+                                   void *context,
+                                   unsigned (*apply1_leaf_function)(unsigned value, void *context)) {
+  return (bdd_apply1_internal(bddm_p, p, bddm_r, context, apply1_leaf_function, FALSE));
 }
 
 
@@ -591,34 +584,32 @@ typedef struct {
   unsigned second_p, second_q;
 } activation_record_apply2_hashed;
 
-
-DECLARE_LOCAL(activation_record_apply2_hashed);
-
 /* apply2_ptr contains pointer to current activation frame
    of bdd_apply2_hashed */
-
-DECLARE_POINTER_TO_LOCAL(activation_record_apply2_hashed, apply2_ptr);
+DECLARE_LOCAL(activation_record_apply2_hashed);
 
 void update_activation_stack_apply2_hashed
-(unsigned (*new_place)(unsigned node)) {
+(unsigned (*new_place)(unsigned node, bdd_manager *bddm_context), bdd_manager *bddm_context, void *context) {
+  DECLARE_POINTER_TO_LOCAL(activation_record_apply2_hashed, apply2_ptr);
+  apply2_ptr = (struct local_activation_record_apply2_hashed *)(context);
   activation_record_apply2_hashed *a_;
   if (apply2_ptr->bddm_p == apply2_ptr->bddm_r) {
     for (a_ = apply2_ptr->act_stack; a_ <= apply2_ptr->a ; a_++) {   
-      a_->p = new_place(a_->p);
+      a_->p = new_place(a_->p, bddm_context);
       a_->h = hash_value_invalid;
       /* a correspond to a leaf, and a_->second_p is only well_defined 
        * for internal nodes */
       if (apply2_ptr->a!= a_) 
-	a_->second_p = new_place(a_->second_p);
+	a_->second_p = new_place(a_->second_p, bddm_context);
     }
     if (apply2_ptr->bddm_q == apply2_ptr->bddm_r) {
       for (a_ =  apply2_ptr->act_stack; a_ <= apply2_ptr->a; a_++) {   
-	a_->q = new_place(a_->q);
+	a_->q = new_place(a_->q, bddm_context);
 	a_->h = hash_value_invalid;
 	/* a correspond to a leaf, and a_->second_q is only well_defined 
 	 * for internal nodes */
 	if (apply2_ptr->a != a_)
-	  a_->second_q = new_place(a_->second_q);	
+	  a_->second_q = new_place(a_->second_q, bddm_context);	
       }	
     }
   }
@@ -626,9 +617,10 @@ void update_activation_stack_apply2_hashed
 
 unsigned bdd_apply2_hashed(bdd_manager *bddm_p, unsigned p, 
 			   bdd_manager *bddm_q, unsigned q,
-			    bdd_manager *bddm_r,
+                           bdd_manager *bddm_r,
+                           void *context,
 			   unsigned (*apply2_leaf_function)
-			   (unsigned p_value, unsigned q_value)) {
+			   (unsigned p_value, unsigned q_value, void *context)) {
   unsigned p_i, q_i;
   unsigned res;
   bdd_record *node_ptr;
@@ -639,7 +631,7 @@ unsigned bdd_apply2_hashed(bdd_manager *bddm_p, unsigned p,
   res = lookup_cache(bddm_r, &h, p, q); /*CACHE MISS STALL*/
 
   if (res != 0) {
-  
+
 #ifdef _BDD_STAT_
     bddm_r->apply2_steps++;
 #endif
@@ -648,8 +640,9 @@ unsigned bdd_apply2_hashed(bdd_manager *bddm_p, unsigned p,
     return res;
   }
   else {
- 
+
     DECLARE_POINTER_TO_LOCAL(activation_record_apply2_hashed, local);
+    DECLARE_POINTER_TO_LOCAL(activation_record_apply2_hashed, apply2_ptr);
     DECLARE_POINTER_TO_LOCAL(activation_record_apply2_hashed, old_apply2_ptr);
 
     DECLARE_SEQUENTIAL_LIST(intermediate, unsigned)
@@ -657,7 +650,7 @@ unsigned bdd_apply2_hashed(bdd_manager *bddm_p, unsigned p,
     NEW_LOCAL(activation_record_apply2_hashed, local,
 		bddm_p, bddm_q, bddm_r);
 
-    MAKE_SEQUENTIAL_LIST(intermediate, unsigned, 1024);
+    MAKE_SEQUENTIAL_LIST(intermediate, unsigned, BDD_INITIAL_SIZE);
 
     old_apply2_ptr = apply2_ptr;
     apply2_ptr = local;
@@ -667,14 +660,27 @@ unsigned bdd_apply2_hashed(bdd_manager *bddm_p, unsigned p,
 #ifdef _BDD_STAT_
     bddm_r->apply2_steps++;
 #endif
-  
+
+    /* if (bddm_r->apply2_steps % 1000 == 0) */
+    /*   printf("Steps: %d\n", bddm_r->apply2_steps); */
+    /* int before_size = intermediate_length; */
     PUSH_SEQUENTIAL_LIST(intermediate, unsigned, going_left);
-  
+    /* Check size of list in case it is exploding. */
+    if (intermediate_length > SEQUENTIAL_LIST_LIMIT) {
+      printf("%s: Sequential list exceeded limit! index: 0x%08x length 0x%08x SEQUENTIAL_LIST_LIMIT: 0x%08x\n",
+             __func__, intermediate_index, intermediate_length, SEQUENTIAL_LIST_LIMIT);
+      FREE_SEQUENTIAL_LIST(intermediate);
+      return 0;
+    }
+    /* if (intermediate_length > before_size) { */
+    /*   printf("Sequential list resize: index: 0x%08x length 0x%08x going_left: 0x%08x res: 0x%08x p_i 0x%08x q_i 0x%08x \n", */
+    /*          intermediate_index, intermediate_length, going_left, res, p_i, q_i); */
+    /* } */
     res = lookup_cache(bddm_r, &h, p, q); /*CACHE MISS STALL*/
 
-    if (res != 0) 
+    if (res != 0) {
       goto finish;
-    else {
+    } else {
       p_table = bddm_p->node_table; /* when we get here from second: or
 				       third: bddm_p->node_table may
 				       have changed as a result of a
@@ -696,9 +702,19 @@ unsigned bdd_apply2_hashed(bdd_manager *bddm_p, unsigned p,
 	node_ptr = &q_table[q];
 	LOAD_lr(node_ptr, tmpq, tmp1);
 
-	res = bdd_find_leaf_hashed(bddm_r, apply2_leaf_function(tmpp, tmpq),
+	res = bdd_find_leaf_hashed(bddm_r, apply2_leaf_function(tmpp, tmpq, context),
 				   SEQUENTIAL_LIST(intermediate),
+                                   (void *) apply2_ptr,
 				   &update_activation_stack_apply2_hashed);
+
+        // Check here for oversized and exit early to prevent memory errors
+        if (bddm_r->table_total_size > BDD_MAX_TOTAL_TABLE_SIZE) {
+          printf("%s: table size exceeded limit! bddm_r->table_total_size: 0x%08x BDD_MAX_TOTAL_TABLE_SIZE: 0x%08x\n",
+                 __func__, bddm_r->table_total_size, BDD_MAX_TOTAL_TABLE_SIZE);
+          FREE_SEQUENTIAL_LIST(intermediate);
+          return 0;
+        }
+
 	if (a->h == hash_value_invalid)
 	  a->h = HASH2(a->p, a->q, bddm_r->cache_mask); 
 	insert_cache(bddm_r, a->h, a->p, a->q, res); 
@@ -753,6 +769,7 @@ unsigned bdd_apply2_hashed(bdd_manager *bddm_p, unsigned p,
 	res = bdd_find_node_hashed(bddm_r, TOP_SEQUENTIAL_LIST(intermediate), 
 				   res, a->index,
 				   SEQUENTIAL_LIST(intermediate),
+                                   (void *) apply2_ptr,
 				   &update_activation_stack_apply2_hashed);  /*CACHE MISS STALL*/
     
       if (a->h == hash_value_invalid)
@@ -761,7 +778,7 @@ unsigned bdd_apply2_hashed(bdd_manager *bddm_p, unsigned p,
     
     finish:
       if (BOTTOM_LOCAL(local)) {
-	FREE_LOCAL(activation_record_apply2_hashed, local);	
+	FREE_LOCAL(activation_record_apply2_hashed, local);
 	FREE_SEQUENTIAL_LIST(intermediate);
 	PUSH_SEQUENTIAL_LIST(bddm_r->roots, unsigned, res);
 	apply2_ptr = old_apply2_ptr;
@@ -785,10 +802,11 @@ typedef struct {
 } activation_record_apply2_sequential;
 
 unsigned bdd_apply2_sequential(bdd_manager *bddm_p, unsigned p, 
-			   bdd_manager *bddm_q, unsigned q,
-			    bdd_manager *bddm_r,
-			   unsigned (*apply2_leaf_function)
-			   (unsigned p_value, unsigned q_value)) {
+                               bdd_manager *bddm_q, unsigned q,
+                               bdd_manager *bddm_r,
+                               void *context,
+                               unsigned (*apply2_leaf_function)
+                               (unsigned p_value, unsigned q_value, void *context)) {
   unsigned p_i, q_i;
   unsigned res;
    bdd_record *node_ptr;
@@ -845,7 +863,7 @@ unsigned bdd_apply2_sequential(bdd_manager *bddm_p, unsigned p,
       LOAD_lr(node_ptr, tmpq, tmp1);
       res = a->result_node;
       node_ptr = &bddm_r->node_table[res];
-      STR_lri(node_ptr, apply2_leaf_function(tmpp, tmpq), 
+      STR_lri(node_ptr, apply2_leaf_function(tmpp, tmpq, context), 
 	      BDD_USED, BDD_LEAF_INDEX); 
       goto finish;}
     else if (p_i == q_i){
@@ -923,22 +941,22 @@ typedef struct {
 
 DECLARE_LOCAL(activation_record_project);
 
-DECLARE_POINTER_TO_LOCAL(activation_record_project, apply_project_ptr);
-
-void update_activation_stack_project(unsigned (*new_place)(unsigned node)) {
+void update_activation_stack_project(unsigned (*new_place)(unsigned node, bdd_manager *bddm_context), bdd_manager *bddm_context, void *context) {
+  DECLARE_POINTER_TO_LOCAL(activation_record_project, apply_project_ptr);
+  apply_project_ptr = (struct local_activation_record_project *)(context);
   activation_record_project *a_;
   if (apply_project_ptr->bddm_p == apply_project_ptr->bddm_r) {
     for (a_ = apply_project_ptr->act_stack; 
 	 a_ <= apply_project_ptr->a ; a_++) {   
-      a_->p = new_place(a_->p);
-      a_->q = new_place(a_->q);
+      a_->p = new_place(a_->p, bddm_context);
+      a_->q = new_place(a_->q, bddm_context);
       a_->h = hash_value_invalid;
       /* a correspond to a leaf, and a_->second_p is only well_defined 
        * for internal nodes */
       if (apply_project_ptr->a != a_) { 
-	a_->second_p = new_place(a_->second_p);
+	a_->second_p = new_place(a_->second_p, bddm_context);
 	if (a_->second_q != BDD_UNUSED)
-	  a_->second_q = new_place(a_->second_q);
+	  a_->second_q = new_place(a_->second_q, bddm_context);
       }
     }      
   }
@@ -947,8 +965,8 @@ void update_activation_stack_project(unsigned (*new_place)(unsigned node)) {
  
 
 unsigned bdd_project(bdd_manager *bddm_p, unsigned p, unsigned var_index,
-		 bdd_manager *bddm_r,
-		 unsigned (*project_leaf_function)(unsigned value1, unsigned value2)) {
+                     bdd_manager *bddm_r, void *context,
+                     unsigned (*project_leaf_function)(unsigned value1, unsigned value2, void *context)) {
   
   unsigned p_i, q_i;
   unsigned res;
@@ -969,6 +987,7 @@ unsigned bdd_project(bdd_manager *bddm_p, unsigned p, unsigned var_index,
     return res;
   } 
   else {
+    DECLARE_POINTER_TO_LOCAL(activation_record_project, apply_project_ptr);
     DECLARE_POINTER_TO_LOCAL(activation_record_project, local);
     DECLARE_POINTER_TO_LOCAL(activation_record_project, old_apply_project_ptr);
     DECLARE_SEQUENTIAL_LIST(intermediate, unsigned)
@@ -976,7 +995,7 @@ unsigned bdd_project(bdd_manager *bddm_p, unsigned p, unsigned var_index,
     NEW_LOCAL(activation_record_project, local,
 	      bddm_p, bddm_p, bddm_r); /* second last argument is dummy */
 
-    MAKE_SEQUENTIAL_LIST(intermediate, unsigned, 1024);
+    MAKE_SEQUENTIAL_LIST(intermediate, unsigned, BDD_INITIAL_SIZE);
 
     old_apply_project_ptr = apply_project_ptr;
     apply_project_ptr = local;
@@ -990,7 +1009,14 @@ unsigned bdd_project(bdd_manager *bddm_p, unsigned p, unsigned var_index,
     node_ptr = &p_table[p];  
     LOAD_index(node_ptr, a->index); /*get index*/ /*CACHE MISS STALL*/
     PUSH_SEQUENTIAL_LIST(intermediate, unsigned, going_left);
-  
+    /* Check size of list in case it is exploding. */
+    if (intermediate_length > SEQUENTIAL_LIST_LIMIT) {
+      printf("%s: Sequential list exceeded limit! index: 0x%08x length 0x%08x SEQUENTIAL_LIST_LIMIT: 0x%08x\n",
+             __func__, intermediate_index, intermediate_length, SEQUENTIAL_LIST_LIMIT);
+      FREE_SEQUENTIAL_LIST(intermediate);
+      return 0;
+    }
+
     if (q != 0) {
       if (p == q) 
 	q = 0; /*we are below var_index, but have converged on same node*/
@@ -1018,8 +1044,9 @@ unsigned bdd_project(bdd_manager *bddm_p, unsigned p, unsigned var_index,
       if (a->index == BDD_LEAF_INDEX) {
 	/*we are at leaf*/
 	LOAD_lr(node_ptr, tmpp, tmp1);
-	res = bdd_find_leaf_hashed(bddm_r, project_leaf_function(tmpp, tmpp), 
+	res = bdd_find_leaf_hashed(bddm_r, project_leaf_function(tmpp, tmpp, context), 
 				   SEQUENTIAL_LIST(intermediate),
+                                   (void *)(apply_project_ptr),
 				   &update_activation_stack_project); 
 	apply_project_ptr = local;
 	if (a->h == hash_value_invalid)
@@ -1051,6 +1078,7 @@ unsigned bdd_project(bdd_manager *bddm_p, unsigned p, unsigned var_index,
 	res = bdd_find_node_hashed(bddm_r, TOP_SEQUENTIAL_LIST(intermediate),
 				   res, a->index, 
 				   SEQUENTIAL_LIST(intermediate),
+                                   (void *)(apply_project_ptr),
 				   &update_activation_stack_project); /*CACHE MISS STALL*/
       }
       apply_project_ptr = local;
@@ -1083,8 +1111,9 @@ unsigned bdd_project(bdd_manager *bddm_p, unsigned p, unsigned var_index,
 	  LOAD_lr(node_ptr, tmpp, tmp1);
 	  node_ptr = &p_table[q];
 	  LOAD_lr(node_ptr, tmpq, tmp1);
-	  res = bdd_find_leaf_hashed(bddm_r, project_leaf_function(tmpp, tmpq),
+	  res = bdd_find_leaf_hashed(bddm_r, project_leaf_function(tmpp, tmpq, context),
 				     SEQUENTIAL_LIST(intermediate),
+                                     (void *)(apply_project_ptr),
 				     &update_activation_stack_project); 
 	  apply_project_ptr = local;
 	  if (a->h == hash_value_invalid)
@@ -1144,6 +1173,7 @@ unsigned bdd_project(bdd_manager *bddm_p, unsigned p, unsigned var_index,
 	res = bdd_find_node_hashed(bddm_r, TOP_SEQUENTIAL_LIST(intermediate), 
 				   res, a->index,
 				   SEQUENTIAL_LIST(intermediate),
+                                   (void *)(apply_project_ptr),
 				   &update_activation_stack_project); /*CACHE MISS STALL*/
       apply_project_ptr = local;
       if (a->h == hash_value_invalid)
@@ -1182,9 +1212,12 @@ unsigned bdd_project(bdd_manager *bddm_p, unsigned p, unsigned var_index,
 
 /* BDD_OPERATE_ON_NODES */
 
-void bdd_operate_on_nodes(bdd_manager *bddm_p, unsigned p, 
+void bdd_operate_on_nodes(bdd_manager *bddm_p, unsigned p,
+                          void *context,
+                          void (*leaf_function)(unsigned value, void *context),
 			  void (*operator_function)
-			  (bdd_record *node_pointer)) {
+			  (bdd_record *node_pointer, void *context,
+                           void (*leaf_function)(unsigned value, void *context))) {
   
    bdd_record *node_ptr;
    bdd_record *p_table;
@@ -1194,7 +1227,7 @@ void bdd_operate_on_nodes(bdd_manager *bddm_p, unsigned p,
   DECLARE_SEQUENTIAL_LIST(intermediate, unsigned);
   
   
-  MAKE_SEQUENTIAL_LIST(intermediate, unsigned, 1024);
+  MAKE_SEQUENTIAL_LIST(intermediate, unsigned, BDD_INITIAL_SIZE);
 
  start:
   
@@ -1203,6 +1236,13 @@ void bdd_operate_on_nodes(bdd_manager *bddm_p, unsigned p,
 #endif
 
   PUSH_SEQUENTIAL_LIST(intermediate, unsigned, going_left);
+  /* Check size of list in case it is exploding. */
+  if (intermediate_length > SEQUENTIAL_LIST_LIMIT) {
+    printf("%s: Sequential list exceeded limit! index: 0x%08x length 0x%08x SEQUENTIAL_LIST_LIMIT: 0x%08x\n",
+           __func__, intermediate_index, intermediate_length, SEQUENTIAL_LIST_LIMIT);
+    FREE_SEQUENTIAL_LIST(intermediate);
+    return;
+  }
   
   p_table = bddm_p->node_table;
   node_ptr = &p_table[p];
@@ -1212,7 +1252,7 @@ void bdd_operate_on_nodes(bdd_manager *bddm_p, unsigned p,
   else {
     LOAD_index(node_ptr,a->index); /*get index*/ /*CACHE MISS STALL*/
     node_ptr->mark = 1; 
-    operator_function(node_ptr);
+    operator_function(node_ptr, context, leaf_function);
  
     if (a->index == BDD_LEAF_INDEX) {
       /*we are at leaf*/
@@ -1255,29 +1295,32 @@ void bdd_operate_on_nodes(bdd_manager *bddm_p, unsigned p,
 
 /* BDD_CALL_LEAFS */
 
-void (*leaf_function_global)(unsigned value);
-
-void bbd_operate_on_leaf (bdd_record *node_pointer) {
+void bbd_operate_on_leaf (bdd_record *node_pointer,
+                          void *context,
+                          void (*leaf_function)(unsigned value, void *context)) {
   unsigned indx, tmpp, tmp1;
   LOAD_index(node_pointer, indx); 
   if (indx == BDD_LEAF_INDEX) {
     LOAD_lr(node_pointer, tmpp, tmp1);
-    (*leaf_function_global) (tmpp);
+    (*leaf_function) (tmpp, context);
   }
 }
 
-void bdd_call_leafs(bdd_manager *bddm_p, unsigned p, 
-		    void (*leaf_function)(unsigned value)) {
-  leaf_function_global = leaf_function;
-  bdd_operate_on_nodes (bddm_p, p, bbd_operate_on_leaf);
+void bdd_call_leafs(bdd_manager *bddm_p, unsigned p,
+                    void *context,
+		    void (*leaf_function)(unsigned value, void *context)) {
+  bdd_operate_on_nodes (bddm_p, p, context, leaf_function, &bbd_operate_on_leaf);
 }
 
 /* BDD_REPLACE_INDICES */
 
-unsigned *indices_map_global;
+void bbd_replace_index (bdd_record *node_pointer,
+                        void *context,
+                        void (*leaf_function)(unsigned value, void *context)) {
 
-void bbd_replace_index (bdd_record *node_pointer) {
+  unsigned *indices_map_global = (unsigned *)(context);
   unsigned indx, l, r;
+  
   LOAD_lri(node_pointer, l, r, indx); 
   if (indx != BDD_LEAF_INDEX) {
     invariant(indices_map_global[indx] <= BDD_MAX_INDEX);
@@ -1287,11 +1330,10 @@ void bbd_replace_index (bdd_record *node_pointer) {
 
 void bdd_replace_indices (bdd_manager *bddm_p, unsigned p, 
 			  unsigned indices_map []) {
-  indices_map_global = indices_map;
-  bdd_operate_on_nodes (bddm_p, p, bbd_replace_index);
+  bdd_operate_on_nodes (bddm_p, p, (void *)(indices_map), NULL, &bbd_replace_index);
 }
 
-extern unsigned fn_identity(unsigned p)
+extern unsigned fn_identity(unsigned p, void *context)
 {
   return p;
 }

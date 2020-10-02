@@ -1,3 +1,4 @@
+/* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /*
  * MONA
  * Copyright (C) 1997-2013 Aarhus University.
@@ -50,22 +51,25 @@ list new_list(unsigned i1, unsigned i2, list nxt)
 }
 
 /* These global because used in prod_term_fn.  */
-static int last_state;
-static list qst, qh, qt;
-static hash_tab htbl;  
+struct prod_term_fn_context {
+  int *last_state;
+  list qt;
+  hash_tab htbl;
+};
 
-unsigned prod_term_fn(unsigned  p, unsigned q)
-{    
+unsigned prod_term_fn(unsigned  p, unsigned q, void *context)
+{
+  struct prod_term_fn_context *ptfc = (struct  prod_term_fn_context *)(context);
   int res;
 
-  if ( (res = (int)(uintptr_t) lookup_in_hash_tab(htbl, p, q)) )
+  if ( (res = (int)(uintptr_t) lookup_in_hash_tab(ptfc->htbl, p, q)) )
     /* res = 0 or id+1 */
     return (--res);
   else {
-    insert_in_hash_tab(htbl,  p, 
-		       q, (void *)(uintptr_t) (res = ++last_state));
-    qt->next = new_list(p, q, (list) 0);
-    qt = qt->next;
+    insert_in_hash_tab(ptfc->htbl,  p, 
+		       q, (void *)(uintptr_t) (res = ++(*ptfc->last_state)));
+    ptfc->qt->next = new_list(p, q, (list) 0);
+    ptfc->qt = ptfc->qt->next;
 
     return (--res);
   }
@@ -73,7 +77,7 @@ unsigned prod_term_fn(unsigned  p, unsigned q)
 
  
 /*insert a loop for the product state (p, q) */
-static GNUC_INLINE void make_loop (bdd_manager *bddm, unsigned p, unsigned q) {
+static GNUC_INLINE void make_loop (bdd_manager *bddm, hash_tab htbl, unsigned p, unsigned q) {
   int res;
   res = (int)(uintptr_t) lookup_in_hash_tab(htbl, p, q);
   invariant(res);
@@ -123,6 +127,9 @@ GNUC_INLINE int make_a_loop_status (int is_loop_p, int status_p,
 
 DFA *dfaProduct(DFA* a1, DFA* a2, dfaProductType ff) 
 {
+  if (!a1 || !a2) {
+    return NULL;
+  }
   DFA *b;
   int i;
   unsigned *root_ptr;
@@ -134,7 +141,10 @@ DFA *dfaProduct(DFA* a1, DFA* a2, dfaProductType ff)
      bdd_size(a1->bddm) : bdd_size(a2->bddm)); 
   
   bdd_manager *bddm; 
-  
+  hash_tab htbl;
+  list qst, qh, qt;
+  int last_state;
+
 /* #define _AUTOMATON_HASHED_IN_PRODUCT_
  */
 
@@ -142,11 +152,17 @@ DFA *dfaProduct(DFA* a1, DFA* a2, dfaProductType ff)
   /*prepare hashed access */
   
   bddm = bdd_new_manager(size_estimate, size_estimate/8 + 2);
+  if (!bddm) {
+    return NULL;
+  }
   bdd_make_cache(bddm, size_estimate, size_estimate/8 + 2);    
   bddm->cache_erase_on_doubling = TRUE ; 
 #else
   /*prepare sequential access*/
   bddm = bdd_new_manager(size_estimate, 0);
+  if (!bddm) {
+    return NULL;
+  }
   bdd_make_cache(bddm, size_estimate, size_estimate/8 + 2); 
 #endif
   
@@ -167,19 +183,27 @@ DFA *dfaProduct(DFA* a1, DFA* a2, dfaProductType ff)
 				     a2->f[qh->li2],
 				     binfun);
     if  (make_a_loop != 2) 
-      make_loop(bddm, qh->li1, qh->li2);
+      make_loop(bddm, htbl, qh->li1, qh->li2);
     else {
+      struct prod_term_fn_context ptfc;
+      ptfc.last_state = &last_state;
+      ptfc.qt = qt;
+      ptfc.htbl = htbl;
+
 #ifdef _AUTOMATON_HASHED_IN_PRODUCT_
       (void) bdd_apply2_hashed (a1->bddm, a1->q[qh->li1], 
 				a2->bddm, a2->q[qh->li2],
 				bddm,
+                                (void *)(&ptfc),
 				&prod_term_fn);
 #else       
       (void) bdd_apply2_sequential (a1->bddm, a1->q[qh->li1], 
 				    a2->bddm, a2->q[qh->li2], 
 				    bddm,
+                                    (void *)(&ptfc),
 				    &prod_term_fn);
-#endif	     
+#endif
+      qt = ptfc.qt;
     }
     qh = qh->next;
   }

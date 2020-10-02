@@ -45,6 +45,41 @@ typedef struct {
 extern int dfa_in_mem; /* number of automata currently in memory */
 extern int max_dfa_in_mem; /* maximum number of automata in memory */
 
+struct path_descr {
+  int value;
+  char *path;
+};
+
+/* Object used to construct DFAs in a thread safe way */
+typedef struct {
+    /* Pointer to the dfa under construction */
+    DFA *aut;
+    /* Current exception under construction */
+    int exception_index;
+    /* Number of exceptions for this state */
+    int no_exceptions;
+    /* Array of exceptions for this state */
+    struct path_descr *exceptions;
+    /* Total number of states */
+    int no_states;
+    /* The default state */
+    unsigned default_state;
+    /* holds indices, which order the offsets argument to dfaBuild */
+    int *sorted_indices;
+    /* holds the offsets argument to dfaBuild */
+    int *global_offsets;
+    /* holds the offsets_size argument to dfaBuild */
+    int offsets_size;
+    /* holds the current exception path, sorted according to the offsets */
+    char *sorted_path;
+
+    DECLARE_SEQUENTIAL_LIST(sub_results, unsigned)
+    int exp_count;
+    bdd_ptr *bddpaths;
+
+} DFABuilder;
+
+
 /* dfa.c */
 DFA *dfaMake(int n);
 DFA *dfaMakeNoBddm(int n);
@@ -77,11 +112,11 @@ void dfaAnalyze(DFA *a, int num, char *names[],
 int dfaStatus(DFA *a);
 
 /* makebasic.c */
-void dfaSetup(int s, int len, int indices[]); 
-void dfaAllocExceptions(int n);
-void dfaStoreException(int s, char *path);
-void dfaStoreState(int s);
-DFA *dfaBuild(char statuses[]);
+DFABuilder *dfaSetup(int s, int len, unsigned indices[]); 
+void dfaAllocExceptions(DFABuilder *b, int n);
+void dfaStoreException(DFABuilder *b, int s, char *path);
+void dfaStoreState(DFABuilder *b, int s);
+DFA *dfaBuild(DFABuilder *b, char statuses[]);
 
 /* printdfa.c */
 void dfaPrintVitals(DFA *a);

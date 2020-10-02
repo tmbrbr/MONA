@@ -166,22 +166,26 @@ void insert_cache(bdd_manager *bddm, unsigned h,
 		  unsigned p, unsigned q, unsigned res);
 
 void double_cache( bdd_manager *bddm,
-		  unsigned (*result_fn)(unsigned r));
+                   bdd_manager *bddm_context,
+                   unsigned (*result_fn)(unsigned r, bdd_manager *bddm_context));
 
 void double_table_sequential(bdd_manager *bddm);
 
-void double_table_and_cache_hashed(bdd_manager *bddm,
+int double_table_and_cache_hashed(bdd_manager *bddm,
 				   unsigned* some_roots,
+                                   void *context,
 				   void (*update_fn)(unsigned (*new_place)
-						     (unsigned node)),
+						     (unsigned node, bdd_manager *bddm_context),
+                                                     bdd_manager *bddm_context, void *context),
 				   unsigned *p_of_find, unsigned *q_of_find,
 				   boolean rehash_p_and_q);
 
 unsigned bdd_apply1_dont_add_roots(bdd_manager *bddm_p, 
 				   unsigned p, 
 				   bdd_manager *bddm_r,
+                                   void *context,
 				   unsigned (*apply1_leaf_function)
-				   (unsigned value));
+				   (unsigned value, void *context));
 
 
 #endif

@@ -105,6 +105,13 @@ if test x$have_win32_gcc = xyes; then
 fi
 
 CFLAGS=$CXXFLAGS
+AX_CHECK_COMPILE_FLAG([-std=gnu99], [
+  CFLAGS+=" -std=gnu99"
+  ], [
+    echo "C compiler cannot compile C11 code"
+      exit -1
+])
+
 AC_SUBST(CFLAGS)
 
 dnl ========== checks for header files ==========

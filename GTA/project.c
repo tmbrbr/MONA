@@ -75,7 +75,7 @@ void zeroPathStates(SsId d, State i, State j, unsigned idx)
 
 /* project auxiliary functions */
 
-unsigned fn_union(unsigned v1, unsigned v2)
+unsigned fn_union(unsigned v1, unsigned v2, void *context)
 {
   unsigned n;
 
@@ -115,17 +115,17 @@ void makeProjectBehaviour(State i, State j)
       bdd_apply2_hashed
 	(res->ss[s].bddm, BDD_ROOT(res->ss[s].bddm, BM(b[s], i1, j1)),
 	 res->ss[s].bddm, BDD_ROOT(res->ss[s].bddm, BM(b[s], i1, j2)),
-	 res->ss[s].bddm, fn_union);
+	 res->ss[s].bddm, NULL, fn_union);
       t1 = BDD_LAST_HANDLE(res->ss[s].bddm);
       bdd_apply2_hashed
 	(res->ss[s].bddm, BDD_ROOT(res->ss[s].bddm, BM(b[s], i2, j1)),
 	 res->ss[s].bddm, BDD_ROOT(res->ss[s].bddm, BM(b[s], i2, j2)),
-	 res->ss[s].bddm, fn_union);
+	 res->ss[s].bddm, NULL, fn_union);
       t2 = BDD_LAST_HANDLE(res->ss[s].bddm);
       bdd_apply2_hashed
 	(res->ss[s].bddm, BDD_ROOT(res->ss[s].bddm, t1),
 	 res->ss[s].bddm, BDD_ROOT(res->ss[s].bddm, t2),
-	 res->ss[s].bddm, fn_union); /***this case could be handled differently!!***/
+	 res->ss[s].bddm, NULL, fn_union); /***this case could be handled differently!!***/
     }
     else { /* {i1,i2}x{j} */
       State i1, i2;
@@ -133,7 +133,7 @@ void makeProjectBehaviour(State i, State j)
       bdd_apply2_hashed
 	(res->ss[s].bddm, BDD_ROOT(res->ss[s].bddm, BM(b[s], i1, j)),
 	 res->ss[s].bddm, BDD_ROOT(res->ss[s].bddm, BM(b[s], i2, j)),
-	 res->ss[s].bddm, fn_union);
+	 res->ss[s].bddm, NULL, fn_union);
     }
   }
   else { /* {i}x{j1,j2} */
@@ -142,7 +142,7 @@ void makeProjectBehaviour(State i, State j)
       bdd_apply2_hashed
 	(res->ss[s].bddm, BDD_ROOT(res->ss[s].bddm, BM(b[s], i, j1)),
 	 res->ss[s].bddm, BDD_ROOT(res->ss[s].bddm, BM(b[s], i, j2)),
-	 res->ss[s].bddm, fn_union);
+	 res->ss[s].bddm, NULL, fn_union);
   } /* ({i}x{j} was filled by bdd_project) */
 
   BM(b[s], i, j) = BDD_LAST_HANDLE(res->ss[s].bddm);
@@ -242,7 +242,7 @@ GTA *gtaQuotientAndProject(GTA *g, unsigned idx, int quotient)
 		    BDD_ROOT(g->ss[s].bddm,
 			     g->ss[s].behaviour[i*g->ss[s].rs+j]),
 		    idx,
-		    res->ss[s].bddm,
+		    res->ss[s].bddm, NULL,
 		    fn_union);
 	BM(b[s], i, j) = BDD_LAST_HANDLE(res->ss[s].bddm);
       }
@@ -267,12 +267,12 @@ GTA *gtaQuotientAndProject(GTA *g, unsigned idx, int quotient)
       unsigned i, s1, s2;
       
       /* make new state for the first two elements */
-      s1 = fn_union(setRead(&initial[s], 0), setRead(&initial[s], 1));
+      s1 = fn_union(setRead(&initial[s], 0), setRead(&initial[s], 1), NULL);
 
       /* unfold the rest and make new states */
       for (i = 2; i < setSize(&initial[s]); i++) {
 	s2 = setRead(&initial[s], i);
-	s1 = fn_union(s1, s2);
+	s1 = fn_union(s1, s2, NULL);
       }
       init[s] = s1;
     }

@@ -41,11 +41,8 @@ typedef unsigned boolean;
 #define TRUE 1
 #define FALSE 0
 
-#define BDD_MAX_TOTAL_TABLE_SIZE 0x1000000 
-/* = 2^24 corresponding to three bytes */
-
-#define BDD_MAX_INDEX 0xfffe
-/* = 0xfffe (since 0xffff = BDD_LEAF_INDEX denotes a leaf) */
+#define BDD_OK 0
+#define BDD_ERROR 1
 
 /*BDD DATA STRUCTURES AND ELEMENTARY OPERATIONS*/
 
@@ -64,6 +61,7 @@ struct bdd_record_ {
   unsigned lri[2]; /*left and right, of type bdd_ptr, each consists of
  		    three bytes, and index (name of variable) is
 		    a two byte an integer */
+
   bdd_ptr next;   /*only the next field of 0th record in a bucket is used*/
   unsigned mark;   /*this field is used in apply1 as a bdd_ptr;it is
 		     also used in other routines such as
@@ -125,10 +123,12 @@ extern bdd_ptr bdd_find_leaf_sequential(bdd_manager *bbdm, unsigned val);
 /* hashed access */
 
 extern bdd_ptr bdd_find_node_hashed(bdd_manager *bddm,
-				     bdd_ptr l, bdd_ptr r, unsigned indx,
-				     bdd_ptr *some_roots,
-				     void (*update_fn)
-				     (bdd_ptr (*new_place)(bdd_ptr node)));
+                                    bdd_ptr l, bdd_ptr r, unsigned indx,
+                                    bdd_ptr *some_roots,
+                                    void *context,
+                                    void (*update_fn)
+                                    (bdd_ptr (*new_place)(bdd_ptr node, bdd_manager *bddm_context),
+                                     bdd_manager *bddm_context, void *context));
 
 extern bdd_ptr bdd_find_node_hashed_add_root(bdd_manager *bddm,
 				     bdd_ptr l, bdd_ptr r, unsigned indx);
@@ -138,8 +138,10 @@ extern bdd_handle bdd_handle_find_node_hashed_add_root(bdd_manager *bddm,
 
 extern bdd_ptr bdd_find_leaf_hashed(bdd_manager *bddm, unsigned val,
 				     void *some_roots,
+                                     void *context,
 				     void (*update_fn)
-				     (bdd_ptr (*new_place)(bdd_ptr node)));
+                                    (bdd_ptr (*new_place)(bdd_ptr node, bdd_manager *bddm_context),
+                                     bdd_manager *bddm_context, void *context));
 
 extern bdd_ptr bdd_find_leaf_hashed_add_root(bdd_manager *bddm, unsigned val);
 
@@ -151,17 +153,22 @@ extern bdd_handle bdd_handle_find_leaf_hashed_add_root(bdd_manager *bddm, unsign
 extern void bdd_prepare_apply1(bdd_manager *bddm);
 
 extern bdd_ptr bdd_apply1(bdd_manager *bddm, bdd_ptr p, 
-			   bdd_manager *bbdm_r, 
-			   unsigned (*apply1_leaf_function)(unsigned value));
+                          bdd_manager *bbdm_r,
+                          void *context,
+                          unsigned (*apply1_leaf_function)(unsigned value, void *context));
 
 /* call *operator_function for each node accessible from p */
-extern void bdd_operate_on_nodes(bdd_manager *bddm_p, bdd_ptr p, 
+extern void bdd_operate_on_nodes(bdd_manager *bddm_p, unsigned p,
+                          void *context,
+                          void (*leaf_function)(unsigned value, void *context),
 			  void (*operator_function)
-			  (bdd_record *node_pointer));
-  
+			  (bdd_record *node_pointer, void *context,
+                           void (*leaf_function)(unsigned value, void *context)));
+
 /* call *leaf_function for each leaf accessible from p */
-extern void bdd_call_leafs(bdd_manager *bddm, bdd_ptr p, 
-			   void (*leaf_function)(unsigned value));
+extern void bdd_call_leafs(bdd_manager *bddm, bdd_ptr p,
+                           void *context,
+			   void (*leaf_function)(unsigned value, void *context));
 
 /* replace the index i of any internal node accessible from p by
    indices_map[i] */
@@ -173,18 +180,21 @@ extern void bdd_replace_indices (bdd_manager *bddm_p,
 extern bdd_ptr bdd_apply2_sequential(bdd_manager *bddm_p, bdd_ptr p, 
 				     bdd_manager *bddm_q, bdd_ptr q,
 				     bdd_manager *bbdm_r,
+                                     void *context,
 				     unsigned (*apply2_leaf_function)
-				     (unsigned p_value, unsigned q_value));
+				     (unsigned p_value, unsigned q_value, void *context));
 
 extern bdd_ptr bdd_apply2_hashed(bdd_manager *bddm_p, bdd_ptr p, 
-				  bdd_manager *bddm_q, bdd_ptr q,
-				  bdd_manager *bbdm_r,
-				  unsigned (*apply2_leaf_function)
-				  (bdd_ptr p_value, bdd_ptr q_value));
+                                 bdd_manager *bddm_q, bdd_ptr q,
+                                 bdd_manager *bbdm_r,
+                                 void *context,
+                                 unsigned (*apply2_leaf_function)
+                                 (bdd_ptr p_value, bdd_ptr q_value, void *context));
 
 extern bdd_ptr bdd_project(bdd_manager *bddm_p, bdd_ptr p, unsigned var_index,
-			    bdd_manager *bddm_r,
-			    unsigned (*project_leaf_function)(unsigned value1, unsigned value2));
+                           bdd_manager *bddm_r,
+                           void *context,
+                           unsigned (*project_leaf_function)(unsigned value1, unsigned value2, void *context));
 
 
 /* BDD_ROOTS */ 
@@ -262,11 +272,17 @@ void print_one_path(bdd_ptr p, bdd_ptr q, bdd_manager *bddm, unsigned no_free_va
 #define BDD_UNUSED 0
 #define BDD_USED 1
 
-/*the index of an "undefined" BDD node*/
-#define BDD_UNDEF (unsigned) -1
+#define BDD_MAX_TOTAL_TABLE_SIZE 0x1000000
+/* = 2^24 corresponding to three bytes */
 
+#define BDD_MAX_INDEX  0x0000FFFE
+/* = 0xfffe (since 0xffff = BDD_LEAF_INDEX denotes a leaf) */
+/*the index of an "undefined" BDD node*/
+#define BDD_UNDEF      0xFFFFFFFF
 /*value of variable index in BDD node used to indicate that node is a leaf*/
-#define BDD_LEAF_INDEX  ((unsigned) 0xffff)
+#define BDD_LEAF_INDEX 0x0000FFFF
+
+#define BDD_INITIAL_SIZE 8196
 
 /* look up the two lri fields in a bdd_record_ and extract the value of
    the left child, the right child, and the node index */
@@ -304,6 +320,9 @@ i1 = ((r & 0x0000ffff) << 16) | i;\
 
 /* results of BDD operations are stored in lists implemented as
    sequential arrays */
+
+/* Set a limit on the number of entries allowed in a SEQUENTIAL_LIST to prevent memory blowups */
+#define SEQUENTIAL_LIST_LIMIT BDD_MAX_TOTAL_TABLE_SIZE
 
 #define DECLARE_SEQUENTIAL_LIST(name, element_type) \
 element_type *name##_array;  \
@@ -403,7 +422,7 @@ struct bdd_manager_ {
   unsigned apply2_steps;
 }; 
 
-extern unsigned fn_identity(unsigned p);
+extern unsigned fn_identity(unsigned p, void *context);
 
 /* invariant check - can't be disabled */
 

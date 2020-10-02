@@ -32,6 +32,12 @@ DFA *dfaMake(int n)
   a = mem_alloc(sizeof *a);
   a->bddm = bdd_new_manager(8 * n, ((n+3)/4)*4 ); /* overflow_increment rounded
 						     up to be div. by 4 */
+  // Can occur if table size is too large
+  if (a->bddm == NULL) {
+    mem_free(a);
+    return NULL;
+  }
+
   a->ns = n;
   a->q = mem_alloc((sizeof *(a->q)) * n);
   a->f = mem_alloc((sizeof *(a->f)) * n); 
@@ -58,12 +64,14 @@ DFA *dfaMakeNoBddm(int n)
 }
 
 void dfaFree(DFA *a) 
-{ 
-  bdd_kill_manager(a->bddm);
-  mem_free(a->q);
-  mem_free(a->f);
-  mem_free(a);
-  dfa_in_mem--;
+{
+  if (a) {
+    bdd_kill_manager(a->bddm);
+    mem_free(a->q);
+    mem_free(a->f);
+    mem_free(a);
+    dfa_in_mem--;
+  }
 }
 
 void dfaNegation(DFA *a) 
@@ -102,7 +110,9 @@ void dfaPrintStatistics()
 DFA *dfaCopy(DFA *a)
 {
   unsigned i;
-
+  if (!a) {
+      return NULL;
+  }
   DFA * result = dfaMake(a->ns);
   result->ns = a->ns;
   result->s = a->s;
@@ -111,7 +121,7 @@ DFA *dfaCopy(DFA *a)
   bdd_prepare_apply1(a->bddm);
 
   for (i = 0; i < a->ns; i++)
-    (void) bdd_apply1(a->bddm, a->q[i], result->bddm, &fn_identity);
+    (void) bdd_apply1(a->bddm, a->q[i], result->bddm, NULL, &fn_identity);
   
   mem_copy(result->q, bdd_roots(result->bddm), sizeof(bdd_ptr)*a->ns);
 

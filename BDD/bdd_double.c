@@ -30,7 +30,7 @@ void double_table_sequential(bdd_manager *bddm) {
   bddm->table_total_size += bddm->table_size;
   bddm->table_size += bddm->table_size;
   
-/*  printf("Doubling table to: Size %u Total %u\n", bddm->table_size, bddm->table_total_size); */
+  /* printf("Doubling table to: Size %u Total %u\n", bddm->table_size, bddm->table_total_size); */
 
   bddm->node_table = mem_resize(bddm->node_table,
 				(size_t)(sizeof (bdd_record)) * 
@@ -43,34 +43,35 @@ void double_table_sequential(bdd_manager *bddm) {
 
 
 
-unsigned double_leaf_fn(unsigned value) {
+unsigned double_leaf_fn(unsigned value, void *context) {
   return (value);
 }
 
-static bdd_manager *old_bddm;
-
-unsigned get_new_r(unsigned r) {
+unsigned get_new_r(unsigned r, bdd_manager *bddm_context) {
   if (r == 0 || r == BDD_UNDEF) {
     return (r);
   }
-  return (old_bddm->node_table[r].mark);
+  return (bddm_context->node_table[r].mark);
 }
 
-void double_table_and_cache_hashed(bdd_manager *bddm,
+int double_table_and_cache_hashed(bdd_manager *bddm,
 				   unsigned* some_roots,
-				   void (*update_fn)(unsigned (*new_place)(unsigned node)),
+                                   void *context,
+				   void (*update_fn)(unsigned (*new_place)(unsigned node, bdd_manager *bddm_context),
+                                                     bdd_manager *bddm_context, void *context),
 				   unsigned *p_of_find, unsigned *q_of_find,
 				   boolean rehash_p_and_q) {
   unsigned *p;  
 
-  old_bddm = mem_alloc((size_t) sizeof (bdd_manager));
+  bdd_manager *old_bddm = mem_alloc((size_t) sizeof (bdd_manager));
   *old_bddm = *bddm;
 
   /*make new bigger table, but only if a bigger one is possible */
   if (bddm->table_total_size > BDD_MAX_TOTAL_TABLE_SIZE) {
-    printf("\nBDD too large (>%d nodes)\n", BDD_MAX_TOTAL_TABLE_SIZE);
-    abort();
+    printf("\ndouble_table_and_cache_hashed: BDD too large (>%d nodes)\n", BDD_MAX_TOTAL_TABLE_SIZE);
+    return BDD_ERROR;
   }
+
   bddm->table_log_size++;
   bddm->table_size *= 2;
   bddm->table_overflow_increment *= 2;
@@ -80,6 +81,7 @@ void double_table_and_cache_hashed(bdd_manager *bddm,
     bddm->table_total_size = (desired_size <= BDD_MAX_TOTAL_TABLE_SIZE)?
       desired_size: BDD_MAX_TOTAL_TABLE_SIZE;
   }
+
   bddm->node_table = (bdd_record*) 
     mem_alloc( (size_t)
 	       bddm->table_total_size
@@ -99,7 +101,7 @@ void double_table_and_cache_hashed(bdd_manager *bddm,
 
   /* initialize bddm roots to the empty list, this new list will
      contain the rehashed addresses of old_bddm->roots*/
-  MAKE_SEQUENTIAL_LIST(bddm->roots, unsigned, 1024);
+  MAKE_SEQUENTIAL_LIST(bddm->roots, unsigned, BDD_INITIAL_SIZE);
   
   /*now rehash all nodes reachable from the old roots; we must be sure
     that the apply1 operation does not entail doubling of bddm node
@@ -111,28 +113,28 @@ void double_table_and_cache_hashed(bdd_manager *bddm,
   bdd_prepare_apply1(old_bddm);
 
   for (p = SEQUENTIAL_LIST(old_bddm->roots); *p ;  p++) {
-    bdd_apply1(old_bddm, *p, bddm, &double_leaf_fn);    
+    bdd_apply1(old_bddm, *p, bddm, NULL, &double_leaf_fn);    
   }
  
   /*also make sure to rehash portion that is accessible from some_roots*/ 
   for (p = some_roots; *p;  p++) {
     if (*p != BDD_UNDEF)
-	*p = bdd_apply1_dont_add_roots(old_bddm, *p, bddm, &double_leaf_fn);    
+      *p = bdd_apply1_dont_add_roots(old_bddm, *p, bddm, NULL, &double_leaf_fn);    
   }
 
   /*and fix values p_of_find and q_of_find if indicated*/
   if (rehash_p_and_q) {
     *p_of_find = 
-	bdd_apply1_dont_add_roots(old_bddm, *p_of_find, bddm, &double_leaf_fn); 
+	bdd_apply1_dont_add_roots(old_bddm, *p_of_find, bddm, NULL, &double_leaf_fn); 
     *q_of_find = 
-	bdd_apply1_dont_add_roots(old_bddm, *q_of_find, bddm, &double_leaf_fn);
+	bdd_apply1_dont_add_roots(old_bddm, *q_of_find, bddm, NULL, &double_leaf_fn);
   }
   
 
 
   /*perform user supplied updates*/
   if (update_fn)
-      (*update_fn)(&get_new_r);
+      (*update_fn)(&get_new_r, old_bddm, context);
 
   /*old_table now contains nodes whose mark field designates the
     new position of the node*/
@@ -144,11 +146,13 @@ void double_table_and_cache_hashed(bdd_manager *bddm,
       }
     else /*this is only a good idea when bddm is different from the  managers
 	   the current apply operation is performed over*/
-	double_cache(bddm, &get_new_r);
- }
+	double_cache(bddm, old_bddm, &get_new_r);
+  }
 
   old_bddm->cache = (cache_record*) 0; /* old cache has been deallocated by now*/
 
   /*deallocated old table and old roots*/
   bdd_kill_manager(old_bddm);
+
+  return BDD_OK;
 }

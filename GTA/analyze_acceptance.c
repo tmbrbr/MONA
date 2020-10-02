@@ -82,26 +82,26 @@ static boolean unprocessed_is_empty(SsId d)
 SsId current_d;
 State current_left_state, current_right_state;
 
-void leaf_function_insert_left(unsigned leaf_value)
+void leaf_function_insert_left(unsigned leaf_value, void *context)
 {
   unsigned i = touch_left_index[current_d][leaf_value]++;
   touch_left[ current_d][leaf_value][i] = current_left_state;
 }
 
-void leaf_function_count_left(unsigned leaf_value)
+void leaf_function_count_left(unsigned leaf_value, void *context)
 { 
   invariant(touch_left_size[current_d][leaf_value] <= 
 	 gta_global->ss[current_d].ls);
   touch_left_size[current_d][leaf_value]++;
 }
 
-void leaf_function_insert_right(unsigned leaf_value)
+void leaf_function_insert_right(unsigned leaf_value, void *context)
 {
   unsigned i = touch_right_index[current_d][leaf_value]++;
   touch_right[current_d][leaf_value][i] = current_right_state;
 }
 
-void leaf_function_count_right(unsigned leaf_value)
+void leaf_function_count_right(unsigned leaf_value, void *context)
 {
   invariant(touch_right_size[current_d][leaf_value] <= 
 	 gta_global->ss[current_d].rs);
@@ -164,6 +164,7 @@ void calculate_touch_arrays()
 	bdd_call_leafs(gta_global->ss[d].bddm, 
 		       BDD_ROOT(gta_global->ss[d].bddm,
 				BEH(gta_global->ss[d], p_left, p_right)),
+                       NULL,
 		       &leaf_function_count_left);
     }
     for (p = 0; p < gta_global->ss[d].size; p++) 
@@ -181,6 +182,7 @@ void calculate_touch_arrays()
 	bdd_call_leafs(gta_global->ss[d].bddm, 
 		       BDD_ROOT(gta_global->ss[d].bddm,
 				BEH(gta_global->ss[d], p_left, p_right)),
+                       NULL,
 		       &leaf_function_insert_left);
     }
   }
@@ -195,6 +197,7 @@ void calculate_touch_arrays()
 	bdd_call_leafs(gta_global->ss[d].bddm, 
 		       BDD_ROOT(gta_global->ss[d].bddm,
 				BEH(gta_global->ss[d], p_left, p_right)),
+                       NULL,
 		       &leaf_function_count_right); 
     }
     for (p = 0; p < gta_global->ss[d].size; p++) 
@@ -212,6 +215,7 @@ void calculate_touch_arrays()
 	bdd_call_leafs(gta_global->ss[d].bddm, 
 		       BDD_ROOT(gta_global->ss[d].bddm,
 				BEH(gta_global->ss[d], p_left, p_right)),
+                       NULL,
 		       &leaf_function_insert_right);
     }
   }

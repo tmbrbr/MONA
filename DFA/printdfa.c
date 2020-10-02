@@ -26,11 +26,15 @@
 
 void dfaPrintVitals(DFA *a)
 {
-  unsigned i = bdd_size(a->bddm);
+  if (a) {
+    unsigned i = bdd_size(a->bddm);
   
-  printf("\nAutomaton has %d state%s and %d BDD-node%s\n", 
-	 a->ns, a->ns==1 ? "" : "s", 
-	 i, i==1 ? "" : "s");
+    printf("\nAutomaton has %d state%s and %d BDD-node%s\n", 
+           a->ns, a->ns==1 ? "" : "s", 
+           i, i==1 ? "" : "s");
+  } else {
+    printf("Null DFA!\n");
+  }
 }
 
 void dfaPrint(DFA *a, int no_free_vars, char **free_variables, unsigned *offsets)

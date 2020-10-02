@@ -24,14 +24,14 @@
 #include <assert.h>
 #include "bdd.h"
 
-unsigned and(unsigned a, unsigned b) { 
+unsigned and(unsigned a, unsigned b, void *context) { 
   if (a && b) 
     return 1;
   else 
     return 0; 
 }
 
-unsigned not(unsigned a) { 
+unsigned not(unsigned a, void *context) { 
   if (a)
     return 0;
   else 
@@ -95,7 +95,7 @@ int main() {
   and_2_7 = bdd_apply2_hashed(bddm, BDD_ROOT(bddm, var2), /* BDD #1 */
       			      bddm, BDD_ROOT(bddm, var7), /* BDD #2 */
 			      bddm1, /* result BDD */
-			      &and); /* leaf operation */
+			      NULL, &and); /* leaf operation */
   
   bdd_update_statistics(bddm, 0); /* update statics group "0" with data from bddm 
 				     before killing the manager */
@@ -121,7 +121,7 @@ int main() {
 
   /* it's safe here to use and_2_7 since no operations were performed
      after it was calculated that could have entailed doubling of table */
-  nand_2_7 = bdd_apply1(bddm1, and_2_7, bddm1, &not);
+  nand_2_7 = bdd_apply1(bddm1, and_2_7, bddm1, NULL, &not);
  
   bdd_update_statistics(bddm1, 1);
   printf("Size of bddm1: %d\n\n", bdd_size(bddm1));

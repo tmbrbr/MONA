@@ -164,7 +164,7 @@ void sort(bdd_ptr *m, unsigned *b,
 
 /* leaf function */
 
-unsigned fn_block(unsigned p)
+unsigned fn_block(unsigned p, void *context)
 {
   return block[s][p];
 }
@@ -258,7 +258,7 @@ GTA *gtaMinimize(GTA *g)
 	    matrix[i*maxSize + j] = transposed[j*maxSize + i] = 
 	      bdd_apply1(orig->ss[s].bddm, 
 			 BDD_ROOT(orig->ss[s].bddm,BEH(orig->ss[s], i, j)),
-			 res->ss[s].bddm,
+			 res->ss[s].bddm, NULL,
 			 fn_block);
 	      
 	/* refine left state space */
@@ -339,7 +339,7 @@ GTA *gtaMinimize(GTA *g)
 	for (j = 0; j < orig->ss[rSs].size; j++) {
 	  bdd_apply1(orig->ss[s].bddm, 
 		     BDD_ROOT(orig->ss[s].bddm, BEH(orig->ss[s], i, j)),
-		     res->ss[s].bddm,
+		     res->ss[s].bddm, NULL,
 		     fn_block);
 	  BEH(res->ss[s], block[lSs][i], block[rSs][j]) =  
 	    BDD_LAST_HANDLE(res->ss[s].bddm);

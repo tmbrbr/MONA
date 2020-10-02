@@ -73,7 +73,7 @@ int offsCmp(const void *i1, const void *i2)
   return 0;
 }
 
-unsigned fn_unite(unsigned p, unsigned q)
+unsigned fn_unite(unsigned p, unsigned q, void *context)
 {
   if (p == q || q == defState)
     return p;
@@ -116,7 +116,7 @@ bdd_ptr unitePaths(bdd_manager *bddm)
   bdd_make_cache(bddm, 8, 4);
   for (n = 1; n < numExceptions; n++)
     p = bdd_apply2_hashed(bddm, p, bddm, bddPath[n],
-			  bddm, &fn_unite);
+			  bddm, NULL, &fn_unite);
   bdd_kill_cache(bddm);
 
   return p;
@@ -209,7 +209,7 @@ void gtaStoreDefault(unsigned p)
 
   /* insert into result BDD manager */
   bdd_prepare_apply1(tmpBddm);
-  bdd_apply1(tmpBddm, united, gta->ss[s].bddm, &fn_identity);
+  bdd_apply1(tmpBddm, united, gta->ss[s].bddm, NULL, &fn_identity);
   bdd_kill_manager(tmpBddm);
   
   /* set behaviour entry */

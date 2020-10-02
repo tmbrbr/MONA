@@ -72,7 +72,7 @@ Tree *make_tree_internal(Tree *left1, Tree *right1, SsId d_, State p,
 
 /* FUNCTIONS */
 
-void leaf_gather_fn(unsigned val) 
+void leaf_gather_fn(unsigned val, void *context) 
 {
   invariant(leafs_gathered_next < leafs_gathered_size);
   leafs_gathered[leafs_gathered_next++] = val;
@@ -91,7 +91,7 @@ void states_reachable(StateSpace *ss,
     leafs_gathered = (State *) mem_alloc(sizeof(State) * ss->size); 
     leafs_gathered_size = ss->size;
     leafs_gathered_next = 0;
-    bdd_call_leafs(ss->bddm, ptr, &leaf_gather_fn);
+    bdd_call_leafs(ss->bddm, ptr, NULL, &leaf_gather_fn);
     *leafs = leafs_gathered;
     *leafs_length = leafs_gathered_next;
   }

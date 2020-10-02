@@ -29,26 +29,28 @@
 void copy_cache_record_and_overflow(bdd_manager *bddm, 
 				    cache_record *old_cache, 
 				    unsigned  i,
-				    unsigned (*result_fn)(unsigned r)) {
+                                    bdd_manager *bddm_context,
+				    unsigned (*result_fn)(unsigned r, bdd_manager *bddm_context)) {
   unsigned p, q, r, h;
   if (CACHE_FULL_BIN0(old_cache[i])) {
     CACHE_LOAD_BIN0(old_cache[i], p, q, r);
     h = HASH2(p, q, bddm->cache_mask);
-    insert_cache(bddm, h, p, q, result_fn(r));
+    insert_cache(bddm, h, p, q, result_fn(r, bddm_context));
     if (CACHE_FULL_BIN1(old_cache[i])) {
       CACHE_LOAD_BIN1(old_cache[i], p, q, r);
       h = HASH2(p, q, bddm->cache_mask);
-      insert_cache(bddm, h, p, q, result_fn(r));
+      insert_cache(bddm, h, p, q, result_fn(r, bddm_context));
     }
   }
   if (old_cache[i].next != 0) {
     copy_cache_record_and_overflow(bddm, old_cache,
-				   old_cache[i].next, result_fn);
+				   old_cache[i].next, bddm_context, result_fn);
   }	
 }	
 
 void double_cache(bdd_manager *bddm,
-		  unsigned (*result_fn)(unsigned r)) {
+                  bdd_manager *bddm_context,
+		  unsigned (*result_fn)(unsigned r, bdd_manager *bddm_context)) {
   cache_record *old_cache = bddm->cache;
   unsigned i;
   unsigned old_size = bddm->cache_size;
@@ -72,7 +74,7 @@ void double_cache(bdd_manager *bddm,
     CACHE_INITIALIZE_RECORD(bddm->cache[i + old_size]);
     /*since the hash function is the same for the new cache except
       that an extra bit in position (log old_size) is added*/
-    copy_cache_record_and_overflow(bddm, old_cache, i, result_fn);
+    copy_cache_record_and_overflow(bddm, old_cache, i, bddm_context, result_fn);
   }
 
   mem_free(old_cache);

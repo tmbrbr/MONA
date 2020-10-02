@@ -1,3 +1,4 @@
+/* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /*
  * MONA
  * Copyright (C) 1997-2013 Aarhus University.
@@ -23,37 +24,46 @@
 #include "dfa.h"
 #include "../Mem/mem.h"
 
-static int *bfs_queue;
-static int *bfs_dist;
-static int *bfs_prev;
-static int bfs_current_distance; 
-static unsigned bfs_current_state; 
-static unsigned head, tail;
+struct automaton_bfs_context {
+  unsigned head;
+  unsigned tail;
+  int *bfs_dist;
+  int *bfs_prev;
+  int *bfs_queue;
+  unsigned bfs_current_state;
+  int bfs_current_distance;
+};
 
-static void automaton_bfs_explore_leaf(unsigned leaf_value)
+static void automaton_bfs_explore_leaf(unsigned leaf_value, void *context)
 { /* each leaf (except perhaps initial state) is visited exactly once */
-  bfs_dist[leaf_value] = bfs_current_distance + 1;
-  bfs_prev[leaf_value] = bfs_current_state;
-  bfs_queue[head++] = leaf_value;
+  struct automaton_bfs_context *abc = (struct automaton_bfs_context *)(context);
+  abc->bfs_dist[leaf_value] = abc->bfs_current_distance + 1;
+  abc->bfs_prev[leaf_value] = abc->bfs_current_state;
+  abc->bfs_queue[abc->head++] = leaf_value;
 }
 
 static void automaton_bfs(DFA *a, int *dist, int *prev)
-{ 
-  head = 1, tail = 0;
-  bfs_dist = dist, bfs_prev = prev;
-  bfs_queue = (int *) mem_alloc((a->ns+1)*sizeof(int));
-  bfs_current_state = a->s;
-  bfs_queue[0] = bfs_current_state;
-  bfs_dist[bfs_current_state] = 0;  
-  bfs_prev[bfs_current_state] = -1;
+{
+  struct automaton_bfs_context abc;
+  abc.head = 1;
+  abc.tail = 0;
+  abc.bfs_dist = dist;
+  abc.bfs_prev = prev;
+  abc.bfs_queue = (int *) mem_alloc((a->ns+1)*sizeof(int));
+  abc.bfs_current_state = a->s;
+  abc.bfs_current_distance = 0;
+
+  abc.bfs_queue[0] = abc.bfs_current_state;
+  abc.bfs_dist[abc.bfs_current_state] = 0;  
+  abc.bfs_prev[abc.bfs_current_state] = -1;
   bdd_prepare_apply1(a->bddm);
 
-  while (tail < head) {
-    bfs_current_state = bfs_queue[tail++];
-    bfs_current_distance = bfs_dist[bfs_current_state];
-    bdd_call_leafs(a->bddm, a->q[bfs_current_state], &automaton_bfs_explore_leaf);
+  while (abc.tail < abc.head) {
+    abc.bfs_current_state = abc.bfs_queue[abc.tail++];
+    abc.bfs_current_distance = abc.bfs_dist[abc.bfs_current_state];
+    bdd_call_leafs(a->bddm, a->q[abc.bfs_current_state], (void *)(&abc), &automaton_bfs_explore_leaf);
   }
-  mem_free(bfs_queue);
+  mem_free(abc.bfs_queue);
 }
 
 typedef struct intlist {

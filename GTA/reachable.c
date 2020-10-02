@@ -32,7 +32,7 @@ static SsId s, lSs, rSs; /* current, left and right state spaces */
 
 /* auxiliary functions */
 
-static unsigned fn_reachable(unsigned v)
+static unsigned fn_reachable(unsigned v, void *context)
 {
   /* first time reached? */
   if (newNumber[s][v] == -1) {
@@ -57,7 +57,7 @@ static void makeReachableBehaviour(State i, State j)
   bdd_apply1(orig->ss[s].bddm, 
 	     BDD_ROOT(orig->ss[s].bddm, 
 		      BEH(orig->ss[s], oldNumber[lSs][i], oldNumber[rSs][j])), 
-	     res->ss[s].bddm, 
+	     res->ss[s].bddm, NULL,
 	     fn_reachable);
   BM(resbeh[s], i, j) = BDD_LAST_HANDLE(res->ss[s].bddm);
 }	

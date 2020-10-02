@@ -48,7 +48,7 @@ GTA *gtaCopy(GTA *P)
       for (p2 = 0; p2 < P->ss[guide.muRight[i]].size; p2++) {
 	bdd_apply1(P->ss[i].bddm, 
 		   BDD_ROOT(P->ss[i].bddm, BEH(P->ss[i], p1, p2)), 
-		   ss->bddm, 
+		   ss->bddm,  NULL,
 		   &fn_identity);
 	BEH((*ss), p1, p2) = BDD_LAST_HANDLE(ss->bddm);
       }

@@ -25,8 +25,8 @@
 #include "bdd_internal.h"
 
 unsigned bdd_apply1_dont_add_roots(bdd_manager *bddm_p, unsigned p, 
-		    bdd_manager *bddm_r,
-		    unsigned (*apply1_leaf_function)(unsigned value));
+                                   bdd_manager *bddm_r, void *context,
+                                   unsigned (*apply1_leaf_function)(unsigned value, void *context));
 
 unsigned unsigned_log_ceiling(unsigned i) {	
 unsigned j, k;
@@ -85,8 +85,10 @@ bdd_manager *bdd_new_manager(unsigned table_size,
       + BDD_NUMBER_OF_BINS + new_bddm->table_overflow_increment;
 
   if (new_bddm->table_total_size > BDD_MAX_TOTAL_TABLE_SIZE) {
-    printf("\nBDD too large (>%d nodes)\n", BDD_MAX_TOTAL_TABLE_SIZE);
-    abort();
+    printf("\nbdd_new_manager: BDD too large (%d > %d nodes)\n",
+           new_bddm->table_total_size, BDD_MAX_TOTAL_TABLE_SIZE);
+    mem_free(new_bddm);
+    return NULL;
   }
 
   new_bddm->node_table = (bdd_record*) 
@@ -106,7 +108,7 @@ bdd_manager *bdd_new_manager(unsigned table_size,
   new_bddm->cache_erase_on_doubling = TRUE;
   
 
-  MAKE_SEQUENTIAL_LIST(new_bddm->roots, unsigned, 1024);
+  MAKE_SEQUENTIAL_LIST(new_bddm->roots, unsigned, BDD_INITIAL_SIZE);
 
 
   /*indicate that there is no result cache*/
@@ -141,7 +143,7 @@ void bdd_make_cache(bdd_manager *bddm, unsigned size, unsigned overflow_incremen
   }  
 }
 
-void bdd_kill_cache(bdd_manager *bddm) { 
+void bdd_kill_cache(bdd_manager *bddm) {
   if (bddm->cache) {
     mem_free(bddm->cache);
   }
